@@ -1,0 +1,3 @@
+ALTER TABLE document_chunks
+ALTER COLUMN content TYPE TEXT,
+ALTER COLUMN content SET NOT NULL;
