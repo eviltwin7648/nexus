@@ -11,6 +11,7 @@ import (
 	"github.com/eviltwin7648/nexus/config"
 	"github.com/eviltwin7648/nexus/internal/agent"
 	"github.com/eviltwin7648/nexus/internal/embedder"
+	"github.com/eviltwin7648/nexus/internal/observe"
 	"github.com/eviltwin7648/nexus/internal/store"
 )
 
@@ -35,7 +36,8 @@ func main() {
 
 	emb := embedder.New(cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel)
 	executor := agent.NewExecutor(st, emb)
-	ag := agent.New(cfg.OpenAIAPIKey, cfg.OpenAIChatModel, executor, log)
+	obsStore := observe.NewStore(st.Pool())
+	ag := agent.New(cfg.OpenAIAPIKey, cfg.OpenAIChatModel, executor, log, obsStore)
 	// engine := query.New(st, emb, cfg.OpenAIAPIKey, cfg.OpenAIChatModel)
 
 	_ = log

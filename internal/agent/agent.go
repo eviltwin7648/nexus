@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/eviltwin7648/nexus/internal/observe"
 )
 
 const (
@@ -23,9 +25,13 @@ type Agent struct {
 	executor *Executor
 	client   *http.Client
 	log      *slog.Logger
+	obs      ObserveStore
+}
+type ObserveStore interface {
+	SaveTrace(ctx context.Context, t *observe.Trace) error
 }
 
-func New(apiKey, model string, executor *Executor, log *slog.Logger) *Agent {
+func New(apiKey, model string, executor *Executor, log *slog.Logger, obs ObserveStore) *Agent {
 	if model == "" {
 		model = defaultChatModel
 	}
@@ -35,6 +41,7 @@ func New(apiKey, model string, executor *Executor, log *slog.Logger) *Agent {
 		executor: executor,
 		client:   &http.Client{Timeout: 60 * time.Second},
 		log:      log,
+		obs:      obs,
 	}
 }
 
@@ -86,6 +93,7 @@ type Result struct {
 }
 
 func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
+	trace := observe.NewTrace(question)
 	messages := []chatMessage{
 		{Role: "system", Content: systemPrompt()},
 		{Role: "user", Content: question},
@@ -95,6 +103,10 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 		a.log.Info("agent iteration", "iteration", i+1, "question", question)
 		resp, err := a.callLLM(ctx, messages)
 		if err != nil {
+			trace.Status = observe.StatusFailed
+			trace.Error = err.Error()
+			trace.FinishedAt = time.Now()
+			a.saveTrace(ctx, trace)
 			return nil, fmt.Errorf("iteration %d llm call: %w", i+1, err)
 		}
 		if len(resp.Choices) == 0 {
@@ -121,6 +133,10 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 
 		if len(raw.ToolCalls) == 0 {
 			content, _ := raw.Content.(string)
+			trace.Answer = content
+			trace.Status = observe.StatusSuccess
+			trace.FinishedAt = time.Now()
+			a.saveTrace(ctx, trace)
 			return &Result{
 				Answer: content,
 				Steps:  steps,
@@ -148,16 +164,31 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 				})
 				break
 			}
+			stepStart := time.Now()
 			result := a.executor.Excute(ctx, toolCall)
+			stepEnd := time.Now()
+			var inputMap map[string]any
+			json.Unmarshal(toolCall.Arguments, &inputMap)
+			trace.Steps = append(trace.Steps, observe.TraceStep{
+				Iteration:  i + 1,
+				Tool:       toolCall.Name,
+				Input:      inputMap,
+				OutputLen:  len(result.Content),
+				TokensUsed: observe.EstimateTokens(result.Content),
+				StartedAt:  stepStart,
+				FinishedAt: stepEnd,
+			})
+
 			steps = append(steps, Step{
 				Iteration: i + 1,
 				Tool:      toolCall.Name,
 				ResultLen: len(result.Content),
 			})
-			a.log.Info("tool execution",
+
+			a.log.Info("tool executed",
 				"tool", toolCall.Name,
+				"duration_ms", stepEnd.Sub(stepStart).Milliseconds(),
 				"result_len", len(result.Content),
-				"is_error", result.IsError,
 			)
 
 			messages = append(messages, chatMessage{
@@ -168,6 +199,11 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 			})
 		}
 		if finished {
+			trace.Answer = finalAnswer
+			trace.Status = observe.StatusSuccess
+			trace.FinishedAt = time.Now()
+			a.saveTrace(ctx, trace)
+
 			return &Result{
 				Answer: finalAnswer, Steps: steps,
 			}, nil
@@ -176,8 +212,18 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 	a.log.Warn("max iterations reached, forcing final answer")
 	finalAnswer, err := a.forceFinalAnswer(ctx, messages)
 	if err != nil {
+		trace.Status = observe.StatusFailed
+		trace.Error = err.Error()
+		trace.FinishedAt = time.Now()
+		a.saveTrace(ctx, trace)
+
 		return nil, fmt.Errorf("force final answer: %w", &err)
 	}
+	trace.Answer = finalAnswer
+	trace.Status = observe.StatusSuccess
+	trace.FinishedAt = time.Now()
+	a.saveTrace(ctx, trace)
+
 	return &Result{
 		Answer: finalAnswer, Steps: steps,
 	}, nil
@@ -257,4 +303,14 @@ func (a *Agent) callLLM(ctx context.Context, messages []chatMessage) (*chatRespo
 	}
 
 	return &result, nil
+}
+
+func (a *Agent) saveTrace(ctx context.Context, trace *observe.Trace) {
+	if a.obs == nil {
+		return
+	}
+	if err := a.obs.SaveTrace(ctx, trace); err != nil {
+		a.log.Error("failed to save trace", "error", err)
+	}
+	a.log.Info(trace.Summary())
 }

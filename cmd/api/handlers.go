@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/eviltwin7648/nexus/internal/agent"
+	"github.com/eviltwin7648/nexus/internal/observe"
 )
 
 type queryRequest struct {
@@ -33,6 +36,7 @@ type errorResponse struct {
 type handlers struct {
 	ag  *agent.Agent
 	log *slog.Logger
+	obs *observe.ObserveStore
 }
 
 // POST /query
@@ -84,6 +88,47 @@ func (h *handlers) health(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"time":   time.Now().Format(time.RFC3339),
 	}, http.StatusOK)
+}
+
+// GET /traces?limit=20
+func (h *handlers) listTraces(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+
+	traces, err := h.obs.ListTraces(r.Context(), limit)
+	if err != nil {
+		writeError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, traces, http.StatusOK)
+}
+
+// GET /traces/{id}
+func (h *handlers) getTrace(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/traces/")
+	if id == "" {
+		writeError(w, "trace id required", http.StatusBadRequest)
+		return
+	}
+
+	trace, err := h.obs.GetTrace(r.Context(), id)
+	if err != nil {
+		writeError(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, trace, http.StatusOK)
+}
+
+// GET /stats
+func (h *handlers) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := h.obs.GetStats(r.Context())
+	if err != nil {
+		writeError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, st, http.StatusOK)
 }
 
 // --- helpers -----------------------------------------------------------------

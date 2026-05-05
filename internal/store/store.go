@@ -41,7 +41,9 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 func (s *Store) Close() {
 	s.pool.Close()
 }
-
+func (s *Store) Pool() *pgxpool.Pool {
+	return s.pool
+}
 func (s *Store) RegisterSource(ctx context.Context, id, sourceType string, config map[string]any) error {
 	configJson, err := json.Marshal(config)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/eviltwin7648/nexus/config"
 	"github.com/eviltwin7648/nexus/internal/agent"
 	"github.com/eviltwin7648/nexus/internal/embedder"
+	"github.com/eviltwin7648/nexus/internal/observe"
 	"github.com/eviltwin7648/nexus/internal/store"
 )
 
@@ -40,14 +41,18 @@ func main() {
 
 	emb := embedder.New(cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel)
 	executor := agent.NewExecutor(st, emb)
-	ag := agent.New(cfg.OpenAIAPIKey, cfg.OpenAIChatModel, executor, log)
 
-	h := &handlers{ag: ag, log: log}
+	obsStore := observe.NewStore(st.Pool())
+	ag := agent.New(cfg.OpenAIAPIKey, cfg.OpenAIChatModel, executor, log, obsStore)
+	h := &handlers{ag: ag, log: log, obs: obsStore}
 
 	// register routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/query", h.query)
 	mux.HandleFunc("/health", h.health)
+	mux.HandleFunc("/traces/", h.getTrace)
+	mux.HandleFunc("/traces", h.listTraces)
+	mux.HandleFunc("/stats", h.stats)
 
 	port := cfg.APIPort
 	if port == "" {
