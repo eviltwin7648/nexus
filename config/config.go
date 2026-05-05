@@ -18,6 +18,7 @@ type Config struct {
 	OpenAIAPIKey         string
 	OpenAIEmbeddingModel string
 	OpenAIChatModel      string
+	APIPort              string
 }
 
 func Load() (*Config, error) {
@@ -51,6 +52,7 @@ func Load() (*Config, error) {
 
 	openaiChatModel := getEnvDefault("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
+	apiPort := getEnvDefault("API_PORT", "8080")
 	return &Config{
 		GitHubToken:          token,
 		DatabaseURL:          dbURL,
@@ -59,6 +61,7 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:         openaiKey,
 		OpenAIEmbeddingModel: openaiEmbeddingModel,
 		OpenAIChatModel:      openaiChatModel,
+		APIPort:              apiPort,
 	}, nil
 }
 

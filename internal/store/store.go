@@ -311,3 +311,66 @@ func (s *Store) SearchChunks(ctx context.Context, queryVec []float32, topK int) 
 	}
 	return results, rows.Err()
 }
+
+func (s *Store) SearchChunksByType(ctx context.Context, queryVec []float32, sourceType string, topK int) ([]ChunkResult, error) {
+	vec := float32SliceToPgVector(queryVec)
+	rows, err := s.pool.Query(ctx, `
+	SELECT 	c.id,
+	c.doc_id,
+	c.source_id,
+	c.source_type,
+	COALESCE(c.metadata->>'doc_path', c.id) AS path,
+	c.chunk_index,
+	c.content,
+	1 - (c.embedding <=> $1::vector) AS score
+	FROM document_chunks c
+	WHERE source_type = $2
+	ORDER BY c.embedding <=> $1::vector
+	LIMIT $3
+	`, vec, sourceType, topK)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []ChunkResult
+	for rows.Next() {
+		var r ChunkResult
+		if err := rows.Scan(&r.Id, &r.DocId, &r.SourceId, &r.SourceType,
+			&r.Path, &r.ChunkIndex, &r.Content, &r.Score,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) GetDocumentByPath(ctx context.Context, path string) (*domain.RawDocument, error) {
+	var doc domain.RawDocument
+	var metaJSON []byte
+	var sourceType string
+
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, source_id, source_type, path, title,
+		       content, metadata, url, checksum, updated_at
+		FROM raw_documents
+		WHERE path = $1
+		LIMIT 1
+	`, path).Scan(
+		&doc.ID, &doc.SourceId, &sourceType, &doc.Path, &doc.Title,
+		&doc.Content, &metaJSON, &doc.URL, &doc.Checksum, &doc.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("document not found: %s", path)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	doc.SourceType = domain.SourceType(sourceType)
+	if err := json.Unmarshal(metaJSON, &doc.Metadata); err != nil {
+		return nil, err
+	}
+
+	return &doc, nil
+}
