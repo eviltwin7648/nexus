@@ -26,7 +26,7 @@ type queryResponse struct {
 type stepJSON struct {
 	Iteration int    `josn:"iteration"`
 	Tool      string `json:"tool"`
-	Retrieved int    `json:"cahrs_retrieved"`
+	Retrieved int    `json:"chars_retrieved"`
 }
 
 type errorResponse struct {

@@ -22,9 +22,10 @@ type ToolCall struct {
 }
 
 type ToolResult struct {
-	Tool    string `json:"name"`
-	Content string `json:"content"`
-	IsError bool   `json:"is_error"`
+	Tool            string `json:"name"`
+	Content         string `json:"content"`
+	IsError         bool   `json:"is_error"`
+	EmbeddingTokens int    `json:"embedding_tokens"`
 }
 
 type SearchArgs struct {
@@ -138,14 +139,14 @@ type Executor struct {
 }
 
 type Embedder interface {
-	Embed(ctx context.Context, text string) ([]float32, error)
+	Embed(ctx context.Context, text string) ([]float32, int, error)
 }
 
 func NewExecutor(st *store.Store, emb Embedder) *Executor {
 	return &Executor{store: st, emb: emb}
 }
 
-func (e *Executor) Excute(ctx context.Context, call ToolCall) ToolResult {
+func (e *Executor) Execute(ctx context.Context, call ToolCall) ToolResult {
 	switch call.Name {
 	case ToolSearch:
 		return e.execSearch(ctx, call.Arguments)
@@ -171,7 +172,7 @@ func (e *Executor) execSearch(ctx context.Context, raw json.RawMessage) ToolResu
 	if args.Limit <= 0 || args.Limit > 0 {
 		args.Limit = 5
 	}
-	vec, err := e.emb.Embed(ctx, args.Query)
+	vec, tokens, err := e.emb.Embed(ctx, args.Query)
 	if err != nil {
 		return ToolResult{Tool: ToolSearch, Content: fmt.Sprintf("embed error: %v", err), IsError: true}
 	}
@@ -183,7 +184,7 @@ func (e *Executor) execSearch(ctx context.Context, raw json.RawMessage) ToolResu
 			IsError: true,
 		}
 	}
-	return ToolResult{Tool: ToolSearch, Content: formatChunks(chunks)}
+	return ToolResult{Tool: ToolSearch, Content: formatChunks(chunks), EmbeddingTokens: tokens}
 }
 
 func (e *Executor) execFilter(ctx context.Context, raw json.RawMessage) ToolResult {
@@ -194,7 +195,7 @@ func (e *Executor) execFilter(ctx context.Context, raw json.RawMessage) ToolResu
 	if args.Limit <= 0 || args.Limit >= 10 {
 		args.Limit = 5
 	}
-	vec, err := e.emb.Embed(ctx, args.Query)
+	vec, tokens, err := e.emb.Embed(ctx, args.Query)
 	if err != nil {
 		return ToolResult{Tool: ToolFilter, Content: fmt.Sprintf("embed error: %v", err), IsError: true}
 	}
@@ -202,7 +203,7 @@ func (e *Executor) execFilter(ctx context.Context, raw json.RawMessage) ToolResu
 	if err != nil {
 		return ToolResult{Tool: ToolFilter, Content: fmt.Sprintf("search error: %v", err), IsError: true}
 	}
-	return ToolResult{Tool: ToolFilter, Content: formatChunks(chunks)}
+	return ToolResult{Tool: ToolFilter, Content: formatChunks(chunks), EmbeddingTokens: tokens}
 }
 
 func (e *Executor) execGetDocument(ctx context.Context, raw json.RawMessage) ToolResult {

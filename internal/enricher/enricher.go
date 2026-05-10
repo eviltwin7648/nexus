@@ -144,7 +144,7 @@ func (e *Enricher) embedChunks(ctx context.Context, chunks []chunker.Chunk) ([][
 		if err != nil {
 			return nil, fmt.Errorf("embed batch %d-%d: %w", i, end, err)
 		}
-		for j, vec := range vectors {
+		for j, vec := range vectors.Vectors {
 			if vec != nil {
 				allEmbeddings[i+j] = vec
 			}

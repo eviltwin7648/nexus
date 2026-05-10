@@ -75,6 +75,11 @@ type chatResponse struct {
 		Message      chatMessage `json:"message"`
 		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	}
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -112,6 +117,8 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 		if len(resp.Choices) == 0 {
 			return nil, fmt.Errorf("no choices returned at iteration %d", i+1)
 		}
+		trace.InputTokens += resp.Usage.PromptTokens
+		trace.OutputTokens += resp.Usage.CompletionTokens
 		raw := resp.Choices[0].Message
 
 		msg := chatMessage{
@@ -165,7 +172,8 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 				break
 			}
 			stepStart := time.Now()
-			result := a.executor.Excute(ctx, toolCall)
+			result := a.executor.Execute(ctx, toolCall)
+			trace.EmbeddingTokens += result.EmbeddingTokens
 			stepEnd := time.Now()
 			var inputMap map[string]any
 			json.Unmarshal(toolCall.Arguments, &inputMap)
@@ -174,7 +182,7 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 				Tool:       toolCall.Name,
 				Input:      inputMap,
 				OutputLen:  len(result.Content),
-				TokensUsed: observe.EstimateTokens(result.Content),
+				TokensUsed: trace.InputTokens + trace.OutputTokens,
 				StartedAt:  stepStart,
 				FinishedAt: stepEnd,
 			})

@@ -31,7 +31,10 @@ type embeddingRequest struct {
 	Input []string `json:"input"`
 	Model string   `json:"model"`
 }
-
+type EmbedResult struct {
+	Vectors   [][]float32
+	TokenUsed int
+}
 type embeddingResponse struct { //ref openaidocs
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
@@ -47,9 +50,9 @@ type embeddingResponse struct { //ref openaidocs
 	} `json:"error"`
 }
 
-func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) (EmbedResult, error) {
 	if len(texts) == 0 {
-		return nil, nil
+		return EmbedResult{}, nil
 	}
 	// gpt error : openai error [invalid_request_error]: Invalid 'input[0]': input cannot be an empty string."
 	// to solve we add a map for original non-empty strings with its index, later we restore the position
@@ -62,40 +65,40 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 		}
 	}
 	if len(filtered) == 0 {
-		return make([][]float32, len(texts)), nil // all empty — return nil vectors
+		return EmbedResult{Vectors: make([][]float32, len(texts))}, nil // all empty — return nil vectors
 	}
 	body, err := json.Marshal(embeddingRequest{
 		Input: filtered,
 		Model: e.model,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return EmbedResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIEmbeddingURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build request :%w", err)
+		return EmbedResult{}, fmt.Errorf("build request :%w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("http post: %w", err)
+		return EmbedResult{}, fmt.Errorf("http post: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return EmbedResult{}, fmt.Errorf("read response: %w", err)
 	}
 	var result embeddingResponse
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("unmarshall response: %w", err)
+		return EmbedResult{}, fmt.Errorf("unmarshall response: %w", err)
 	}
 	if result.Error != nil {
-		return nil, fmt.Errorf("openai error [%s]: %s", result.Error.Type, result.Error.Message)
+		return EmbedResult{}, fmt.Errorf("openai error [%s]: %s", result.Error.Type, result.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai returned %d: %s", resp.StatusCode, raw)
+		return EmbedResult{}, fmt.Errorf("openai returned %d: %s", resp.StatusCode, raw)
 	}
 	vectors := make([][]float32, len(texts))
 	for filteredIdx, d := range result.Data {
@@ -103,16 +106,19 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 		vectors[originalIdx] = d.Embedding
 	}
 
-	return vectors, nil
+	return EmbedResult{
+		Vectors:   vectors,
+		TokenUsed: result.Usage.TotalTokens,
+	}, nil
 }
 
-func (e *Embedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	vectors, err := e.EmbedBatch(ctx, []string{text})
+func (e *Embedder) Embed(ctx context.Context, text string) ([]float32, int, error) {
+	result, err := e.EmbedBatch(ctx, []string{text})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if len(vectors) == 0 || vectors[0] == nil {
-		return nil, fmt.Errorf("no embedding returned")
+	if len(result.Vectors) == 0 || result.Vectors[0] == nil {
+		return nil, 0, fmt.Errorf("no embedding returned")
 	}
-	return vectors[0], nil
+	return result.Vectors[0], result.TokenUsed, nil
 }

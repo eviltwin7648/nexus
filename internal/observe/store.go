@@ -37,12 +37,14 @@ type StepDetail struct {
 }
 
 type Stats struct {
-	TotalQueries  int     `json:"total_queries"`
-	Successful    int     `json:"successful"`
-	Failed        int     `json:"failed"`
-	AvgDurationMS float64 `json:"avg_duration_ms"`
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCostUSD  float64 `json:"total_cost_usd"`
+	TotalQueries    int     `json:"total_queries"`
+	Successful      int     `json:"successful"`
+	Failed          int     `json:"failed"`
+	AvgDurationMS   float64 `json:"avg_duration_ms"`
+	InputTokens     int     `json:"input_tokens"`
+	OutputTokens    int     `json:"output_tokens"`
+	EmbeddingTokens int     `json:"embedding_tokens"`
+	TotalCostUSD    float64 `json:"total_cost_usd"`
 }
 type ObserveStore struct {
 	pool *pgxpool.Pool
@@ -62,20 +64,25 @@ func (s *ObserveStore) SaveTrace(ctx context.Context, t *Trace) error {
 	// insert trace
 	_, err = tx.Exec(ctx, `
 		INSERT INTO traces (
-			id, question, answer, status, error,
-			total_ms, total_tokens, estimated_cost_usd, created_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (id) DO UPDATE SET
-			answer             = EXCLUDED.answer,
-			status             = EXCLUDED.status,
-			error              = EXCLUDED.error,
-			total_ms           = EXCLUDED.total_ms,
-			total_tokens       = EXCLUDED.total_tokens,
-			estimated_cost_usd = EXCLUDED.estimated_cost_usd
+				id, question, answer, status, error,
+				total_ms, total_tokens, input_tokens, output_tokens,
+				embedding_tokens, estimated_cost_usd, created_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			ON CONFLICT (id) DO UPDATE SET
+				answer           = EXCLUDED.answer,
+				status           = EXCLUDED.status,
+				error            = EXCLUDED.error,
+				total_ms         = EXCLUDED.total_ms,
+				total_tokens     = EXCLUDED.total_tokens,
+				input_tokens     = EXCLUDED.input_tokens,
+				output_tokens    = EXCLUDED.output_tokens,
+				embedding_tokens = EXCLUDED.embedding_tokens,
+				estimated_cost_usd = EXCLUDED.estimated_cost_usd
 	`,
 		t.ID, t.Question, t.Answer, t.Status, t.Error,
-		t.TotalMS(), t.TotalTokens(), t.EstimatedCostUSD(),
-		t.StartedAt,
+		t.TotalMS(), t.TotalTokens(),
+		t.InputTokens, t.OutputTokens, t.EmbeddingTokens,
+		t.TotalCostUSD(), t.StartedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert trace: %w", err)
@@ -187,16 +194,20 @@ func (s *ObserveStore) GetStats(ctx context.Context) (*Stats, error) {
 	var st Stats
 	err := s.pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*)                            AS total_queries,
-			COUNT(*) FILTER (WHERE status='success') AS successful,
-			COUNT(*) FILTER (WHERE status='failed')  AS failed,
-			COALESCE(AVG(total_ms), 0)          AS avg_duration_ms,
-			COALESCE(SUM(total_tokens), 0)      AS total_tokens,
-			COALESCE(SUM(estimated_cost_usd),0) AS total_cost_usd
+			COUNT(*)                                     AS total_queries,
+			COUNT(*) FILTER (WHERE status='success')     AS successful,
+			COUNT(*) FILTER (WHERE status='failed')      AS failed,
+			COALESCE(AVG(total_ms), 0)                   AS avg_duration_ms,
+			COALESCE(SUM(input_tokens), 0)               AS input_tokens,
+			COALESCE(SUM(output_tokens), 0)              AS output_tokens,
+			COALESCE(SUM(embedding_tokens), 0)           AS embedding_tokens,
+			COALESCE(SUM(estimated_cost_usd), 0)         AS total_cost_usd
 		FROM traces
-	`).Scan(
+`).Scan(
 		&st.TotalQueries, &st.Successful, &st.Failed,
-		&st.AvgDurationMS, &st.TotalTokens, &st.TotalCostUSD,
+		&st.AvgDurationMS,
+		&st.InputTokens, &st.OutputTokens, &st.EmbeddingTokens,
+		&st.TotalCostUSD,
 	)
 	return &st, err
 }
