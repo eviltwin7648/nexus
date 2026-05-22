@@ -175,6 +175,12 @@ func (a *Agent) Run(ctx context.Context, question string) (*Result, error) {
 			result := a.executor.Execute(ctx, toolCall)
 			trace.EmbeddingTokens += result.EmbeddingTokens
 			stepEnd := time.Now()
+			if result.IsError {
+				a.log.Error("tool execution failed",
+					"tool", toolCall.Name,
+					"error", result.Content,
+				)
+			}
 			var inputMap map[string]any
 			json.Unmarshal(toolCall.Arguments, &inputMap)
 			trace.Steps = append(trace.Steps, observe.TraceStep{

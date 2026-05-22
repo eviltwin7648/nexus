@@ -379,7 +379,7 @@ func (s *Store) GetDocumentByPath(ctx context.Context, path string) (*domain.Raw
 
 func (s *Store) LexicalSearch(ctx context.Context, query string, topK int, sourceType *string) ([]ChunkResult, error) {
 	rows, err := s.pool.Query(ctx, `
-	SELECT id,doc_id,source_id,source_type,metadata->>'doc_path' as path, chunk_index, content, ts_rank(search_vector, to_tsquery($1)) as rank
+	SELECT id,doc_id,source_id,source_type,metadata->>'doc_path' as path, chunk_index, content, ts_rank(search_vector, plainto_tsquery('simple', $1)) as rank
 	FROM document_chunks
 	WHERE search_vector @@ plainto_tsquery('simple', $1)
 	ORDER BY rank DESC

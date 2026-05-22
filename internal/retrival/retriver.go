@@ -29,19 +29,19 @@ func (s *Retriver) Store() *store.Store {
 }
 
 func (s *Retriver) HybridSearch(ctx context.Context, query string, sourceType *string) ([]RankedCandidate, error) {
-	g, ctx := errgroup.WithContext(ctx)
+	g, groupCtx := errgroup.WithContext(ctx)
 	var lex []store.ChunkResult
 	var vec []store.ChunkResult
 
 	g.Go(func() error {
 		var err error
-		lex, err = s.LexicalSearch(ctx, query, sourceType)
+		lex, err = s.LexicalSearch(groupCtx, query, sourceType)
 		return err
 	})
 
 	g.Go(func() error {
 		var err error
-		vec, err = s.VectorSearch(ctx, query, sourceType)
+		vec, err = s.VectorSearch(groupCtx, query, sourceType)
 		return err
 	})
 	if err := g.Wait(); err != nil {
