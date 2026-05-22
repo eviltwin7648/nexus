@@ -24,7 +24,7 @@ func (w *Ingester) Ingest(ctx context.Context, doc domain.RawDocument) error {
 	start := time.Now()
 	same, err := w.store.ChecksumExists(ctx, doc.ID, doc.Checksum)
 	if err != nil {
-		w.recordFailure(ctx, doc, fmt.Errorf("checksum checl: %w", err))
+		w.recordFailure(ctx, doc, fmt.Errorf("checksum check: %w", err))
 		return err
 	}
 	if same {

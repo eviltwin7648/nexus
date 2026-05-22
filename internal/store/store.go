@@ -376,3 +376,27 @@ func (s *Store) GetDocumentByPath(ctx context.Context, path string) (*domain.Raw
 
 	return &doc, nil
 }
+
+func (s *Store) LexicalSearch(ctx context.Context, query string, topK int, sourceType *string) ([]ChunkResult, error) {
+	rows, err := s.pool.Query(ctx, `
+	SELECT id,doc_id,source_id,source_type,metadata->>'doc_path' as path, chunk_index, content, ts_rank(search_vector, to_tsquery($1)) as rank
+	FROM document_chunks
+	WHERE search_vector @@ plainto_tsquery('simple', $1)
+	ORDER BY rank DESC
+	LIMIT $2
+	`, query, topK)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []ChunkResult
+	for rows.Next() {
+		var r ChunkResult
+		if err := rows.Scan(&r.Id, &r.DocId, &r.SourceId, &r.SourceType,
+			&r.Path, &r.ChunkIndex, &r.Content, &r.Score); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}

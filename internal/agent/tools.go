@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eviltwin7648/nexus/internal/store"
+	retriver "github.com/eviltwin7648/nexus/internal/retrival"
 )
 
 const (
@@ -134,16 +134,15 @@ func ToolDefinitions() []map[string]any {
 }
 
 type Executor struct {
-	store *store.Store
-	emb   Embedder
+	retriver *retriver.Retriver
 }
 
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, int, error)
 }
 
-func NewExecutor(st *store.Store, emb Embedder) *Executor {
-	return &Executor{store: st, emb: emb}
+func NewExecutor(r *retriver.Retriver) *Executor {
+	return &Executor{retriver: r}
 }
 
 func (e *Executor) Execute(ctx context.Context, call ToolCall) ToolResult {
@@ -169,22 +168,22 @@ func (e *Executor) execSearch(ctx context.Context, raw json.RawMessage) ToolResu
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return ToolResult{Tool: ToolSearch, Content: "invalid arguments", IsError: true}
 	}
-	if args.Limit <= 0 || args.Limit > 0 {
+	if args.Limit <= 0 || args.Limit >= 10 {
 		args.Limit = 5
 	}
-	vec, tokens, err := e.emb.Embed(ctx, args.Query)
-	if err != nil {
-		return ToolResult{Tool: ToolSearch, Content: fmt.Sprintf("embed error: %v", err), IsError: true}
-	}
-	chunks, err := e.store.SearchChunks(ctx, vec, args.Limit)
+
+	ranked, err := e.retriver.HybridSearch(ctx, args.Query, nil)
 	if err != nil {
 		return ToolResult{
 			Tool:    ToolSearch,
-			Content: fmt.Sprintf("search error: %w", err),
+			Content: fmt.Sprintf("search error: %v", err),
 			IsError: true,
 		}
 	}
-	return ToolResult{Tool: ToolSearch, Content: formatChunks(chunks), EmbeddingTokens: tokens}
+	if len(ranked) > args.Limit {
+		ranked = ranked[:args.Limit]
+	}
+	return ToolResult{Tool: ToolSearch, Content: formatRanked(ranked)}
 }
 
 func (e *Executor) execFilter(ctx context.Context, raw json.RawMessage) ToolResult {
@@ -195,15 +194,14 @@ func (e *Executor) execFilter(ctx context.Context, raw json.RawMessage) ToolResu
 	if args.Limit <= 0 || args.Limit >= 10 {
 		args.Limit = 5
 	}
-	vec, tokens, err := e.emb.Embed(ctx, args.Query)
+	ranked, err := e.retriver.HybridSearch(ctx, args.Query, &args.SourceType)
 	if err != nil {
-		return ToolResult{Tool: ToolFilter, Content: fmt.Sprintf("embed error: %v", err), IsError: true}
+		return ToolResult{Tool: ToolFilter, Content: fmt.Sprintf("filter error: %v", err), IsError: true}
 	}
-	chunks, err := e.store.SearchChunksByType(ctx, vec, args.SourceType, args.Limit)
-	if err != nil {
-		return ToolResult{Tool: ToolFilter, Content: fmt.Sprintf("search error: %v", err), IsError: true}
+	if len(ranked) > args.Limit {
+		ranked = ranked[:args.Limit]
 	}
-	return ToolResult{Tool: ToolFilter, Content: formatChunks(chunks), EmbeddingTokens: tokens}
+	return ToolResult{Tool: ToolFilter, Content: formatRanked(ranked)}
 }
 
 func (e *Executor) execGetDocument(ctx context.Context, raw json.RawMessage) ToolResult {
@@ -212,7 +210,7 @@ func (e *Executor) execGetDocument(ctx context.Context, raw json.RawMessage) Too
 		return ToolResult{Tool: ToolGetDocument, Content: "invalid arguments", IsError: true}
 	}
 
-	doc, err := e.store.GetDocumentByPath(ctx, args.Path)
+	doc, err := e.retriver.Store().GetDocumentByPath(ctx, args.Path)
 	if err != nil {
 		return ToolResult{Tool: ToolGetDocument, Content: fmt.Sprintf("not found: %v", err), IsError: true}
 	}
@@ -229,15 +227,15 @@ func (e *Executor) execGetDocument(ctx context.Context, raw json.RawMessage) Too
 	}
 }
 
-func formatChunks(chunks []store.ChunkResult) string {
-	if len(chunks) == 0 {
+func formatRanked(candidates []retriver.RankedCandidate) string {
+	if len(candidates) == 0 {
 		return "No results found."
 	}
-
 	var sb strings.Builder
-	for i, c := range chunks {
-		sb.WriteString(fmt.Sprintf("[%d] %s (score: %.2f)\n%s\n\n",
-			i+1, c.Path, c.Score, c.Content))
+	for i, c := range candidates {
+		path := c.Candidate.Meta["path"]
+		fmt.Fprintf(&sb, "[%d] %s (relevance score: %.4f)\n%s\n\n",
+			i+1, path, c.Score, c.Candidate.Text)
 	}
 	return sb.String()
 }

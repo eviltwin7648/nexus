@@ -13,6 +13,7 @@ import (
 	"github.com/eviltwin7648/nexus/internal/agent"
 	"github.com/eviltwin7648/nexus/internal/embedder"
 	"github.com/eviltwin7648/nexus/internal/observe"
+	retriver "github.com/eviltwin7648/nexus/internal/retrival"
 	"github.com/eviltwin7648/nexus/internal/store"
 )
 
@@ -40,7 +41,10 @@ func main() {
 	defer st.Close()
 
 	emb := embedder.New(cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel)
-	executor := agent.NewExecutor(st, emb)
+	cohereKey := os.Getenv("COHERE_API_KEY")
+	reranker := retriver.NewCohereReranker(cohereKey, os.Getenv("COHERE_MODEL"))
+	r := retriver.NewRetriver(st, emb, reranker)
+	executor := agent.NewExecutor(r)
 
 	obsStore := observe.NewStore(st.Pool())
 	ag := agent.New(cfg.OpenAIAPIKey, cfg.OpenAIChatModel, executor, log, obsStore)

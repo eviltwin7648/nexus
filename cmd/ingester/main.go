@@ -15,7 +15,7 @@ import (
 	"github.com/eviltwin7648/nexus/internal/embedder"
 	"github.com/eviltwin7648/nexus/internal/enricher"
 	"github.com/eviltwin7648/nexus/internal/store"
-	"github.com/eviltwin7648/nexus/internal/worker"
+	"github.com/eviltwin7648/nexus/internal/ingestor"
 )
 
 func main() {
