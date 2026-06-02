@@ -10,63 +10,37 @@
 
 Nexus operates on two primary pipelines: the **Ingestion & Enrichment Pipeline** and the **Retrieval & Reranking Query Pipeline**.
 
-### 1. Ingestion & Enrichment Pipeline
-
-This background pipeline fetches files from GitHub repositories, performs file classification, applies AST-aware chunking, generates embeddings, and indexes them in PostgreSQL.
-
 ```mermaid
-flowchart TD
-subgraph GitHub Ingestion
-    Git[GitHub Repo] -->|Fetch / Diff API| Ingester[Ingester Worker]
-end
+flowchart LR
 
-subgraph Change Detection
-    Ingester -->|MD5 / Checksum Check| Check{Checksum Changed?}
-    Check -->|No| Skip[Skip & Record 'skipped' Job]
-    Check -->|Yes| RawDB[(raw_documents table)]
-end
+    subgraph Indexing Pipeline
+        GitHub[GitHub Repo]
+        Diff[Diff / Full Sync]
+        Chunk[AST / Markdown / Basic Chunking]
+        Embed[OpenAI Embeddings]
+        DB[(Postgres + pgvector)]
 
-subgraph Enrichment Loop
-    RawDB -->|Poll 'pending_enrichment'| Enricher[Enricher Worker]
-    Enricher --> Classifier[File Classifier]
-    Classifier -->|Choose Strategy| Strategy{Strategy}
-    Strategy -->|AST Strategy| AST[AST-Aware Chunker]
-    Strategy -->|Markdown Strategy| MD[Markdown Header Chunker]
-    Strategy -->|Statement Strategy| Statement[Statement Chunker] - basic word chunker
-    Strategy -->|Basic Strategy| Basic[Basic Word Chunker]
-    AST -->|Tree-Sitter Parse| Chunks[Symbol Chunks]
-    Chunks -->|OpenAI Batch Embed| Embed[Embedder]
-    Embed -->|Upsert Chunks & Metadata| ChunksDB[(document_chunks table)]
-    ChunksDB -->|Update Status| Done[Mark Document as 'enriched']
-end
-```
+        GitHub --> Diff
+        Diff --> Chunk
+        Chunk --> Embed
+        Embed --> DB
+    end
 
----
+    subgraph Query Pipeline
+        User[User Query]
+        Search[Hybrid Search]
+        RRF[RRF Merge]
+        Rerank[Cohere Reranker]
+        Agent[Agent]
+        Answer[Answer]
 
-### 2. Retrieval & Reranking Query Pipeline
-
-This pipeline processes user queries using concurrent search strategies, combines their ranks using Reciprocal Rank Fusion (RRF), and filters them through a Cohere Cross-Encoder Reranker.
-
-```mermaid
-flowchart TD
-Q[User Query] -->|Hybrid Search| SearchGate[Go errgroup Gate]
-
-subgraph Retrieval Layer (Concurrent)
-    SearchGate -->|GoRoutine 1| VS[Vector Search]
-    SearchGate -->|GoRoutine 2| LS[Lexical Search]
-    VS -->|Cosine Distance Ops| VectorDB[(document_chunks HNSW Index)]
-    LS -->|ts_rank @@ simple tsquery| LexicalDB[(document_chunks GIN Index)]
-end
-
-VectorDB -->|Top 50 Chunks| Merge[RRF Rank Merger]
-LexicalDB -->|Top 50 Chunks| Merge
-
-subgraph Ranking & Reranking
-    Merge -->|Reciprocal Rank Fusion| RRFScore[RRF Ranked Candidates]
-    RRFScore -->|Truncate to Top 20| Reranker[Cohere Cross-Encoder Reranker]
-    Reranker -->|CLS/SEP Sequence Attention| FinalScore[Relevance Score Reranked]
-    FinalScore -->|Limit to Top 8 Chunks| Context[Query Context Output]
-end
+        User --> Search
+        DB --> Search
+        Search --> RRF
+        RRF --> Rerank
+        Rerank --> Agent
+        Agent --> Answer
+    end
 ```
 
 ---
