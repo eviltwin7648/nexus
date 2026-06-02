@@ -10,6 +10,7 @@ import (
 	"github.com/eviltwin7648/nexus/internal/chunker"
 	"github.com/eviltwin7648/nexus/internal/domain"
 	"github.com/eviltwin7648/nexus/internal/embedder"
+	"github.com/eviltwin7648/nexus/internal/parser"
 	"github.com/eviltwin7648/nexus/internal/store"
 )
 
@@ -26,10 +27,10 @@ type Enricher struct {
 	log      *slog.Logger
 }
 
-func New(st *store.Store, emb *embedder.Embedder, log *slog.Logger) *Enricher {
+func New(st *store.Store, emb *embedder.Embedder, log *slog.Logger, registry *parser.Registry) *Enricher {
 	return &Enricher{
 		store:    st,
-		chunker:  chunker.New(),
+		chunker:  chunker.New(registry),
 		embedder: emb,
 		log:      log,
 	}
@@ -43,7 +44,7 @@ func (e *Enricher) Run(ctx context.Context) {
 			e.log.Info("enricher stopped")
 			return
 		default:
-			proccessed, err := e.processBatch(ctx)
+			proccessed, err := e.ProcessBatch(ctx)
 			if err != nil {
 				e.log.Error("enrichment batch failed", "error", err)
 				sleep(ctx, 10*time.Second) // back-off on err
@@ -55,7 +56,7 @@ func (e *Enricher) Run(ctx context.Context) {
 	}
 }
 
-func (e *Enricher) processBatch(ctx context.Context) (int, error) {
+func (e *Enricher) ProcessBatch(ctx context.Context) (int, error) {
 	docs, err := e.store.GetPendingDocuments(ctx, pollBatchSize)
 	if err != nil {
 		return 0, fmt.Errorf("get pending documents: %w", err)
@@ -85,7 +86,11 @@ func (e *Enricher) enrichOne(ctx context.Context, doc domain.RawDocument) error 
 		return e.store.MarkDocumentEnriched(ctx, doc.ID)
 	}
 	//chunk
-	chunks := e.chunker.Chunk(doc)
+	chunks, err := e.chunker.Chunk(doc)
+	if err != nil {
+		_ = e.store.MarkDocumentFailed(ctx, doc.ID, err.Error())
+		return fmt.Errorf("chunk document: %w", err)
+	}
 	if len(chunks) == 0 {
 		e.log.Warn("document produced no chunks", "id", doc.ID, "path", doc.Path)
 		return e.store.MarkDocumentEnriched(ctx, doc.ID)

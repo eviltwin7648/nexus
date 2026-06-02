@@ -14,8 +14,10 @@ import (
 	"github.com/eviltwin7648/nexus/internal/domain"
 	"github.com/eviltwin7648/nexus/internal/embedder"
 	"github.com/eviltwin7648/nexus/internal/enricher"
+	worker "github.com/eviltwin7648/nexus/internal/ingestor"
+	"github.com/eviltwin7648/nexus/internal/parser"
+	"github.com/eviltwin7648/nexus/internal/parser/languages"
 	"github.com/eviltwin7648/nexus/internal/store"
-	"github.com/eviltwin7648/nexus/internal/ingestor"
 )
 
 func main() {
@@ -68,7 +70,13 @@ func main() {
 		connectors = append(connectors, c)
 		log.Info("register connector", "soruce", c.ID())
 	}
-
+	parserRegistry := parser.NewRegistry(
+		languages.NewTypeScriptParser(),
+		languages.NewJavaScriptParser(),
+		languages.NewGoParser(),
+		languages.NewPythonParser(),
+		languages.NewJavaParser(),
+	)
 	//initial sync
 	for _, c := range connectors {
 		if err := syncConnector(ctx, c, st, ingester, log); err != nil {
@@ -79,7 +87,7 @@ func main() {
 	//enricher (runs concurrentely with the ingestion loop)
 
 	emb := embedder.New(cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel)
-	enr := enricher.New(st, emb, log)
+	enr := enricher.New(st, emb, log, parserRegistry)
 
 	go enr.Run(ctx)
 	//polling ticker

@@ -24,18 +24,15 @@ type Config struct {
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
-	token, err := getEnv("GITHUB_TOKEN")
-	if err != nil {
-		return nil, err
-	}
+	token := os.Getenv("GITHUB_TOKEN")
 	dbURL, err := getEnv("DATABASE_URL")
 	if err != nil {
 		return nil, err
 	}
 
-	repos, err := getEnvList("GITHUB_REPOS")
-	if err != nil {
-		return nil, err
+	var repos []string
+	if reposVal := os.Getenv("GITHUB_REPOS"); reposVal != "" {
+		repos = strings.Split(reposVal, ",")
 	}
 
 	pollMins, err := getEnvInt("POLL_INTERVAL_MINS", 30)
@@ -89,12 +86,4 @@ func getEnvInt(key string, def int) (int, error) {
 		return n, nil
 	}
 	return def, nil
-}
-
-func getEnvList(key string) ([]string, error) {
-	v, err := getEnv(key)
-	if err != nil {
-		return nil, err
-	}
-	return strings.Split(v, ","), nil
 }

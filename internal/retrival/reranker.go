@@ -65,6 +65,22 @@ func (r *CohereReranker) Rerank(ctx context.Context, query string, candidates []
 		return nil, nil
 	}
 
+	if r.cohereApiKey == "" {
+		var results []RankedCandidate
+		limit := len(candidates)
+		if limit > Topk {
+			limit = Topk
+		}
+		for i := 0; i < limit; i++ {
+			results = append(results, RankedCandidate{
+				Candidate: candidates[i],
+				Score:     candidates[i].Score,
+				Rank:      i + 1,
+			})
+		}
+		return results, nil
+	}
+
 	documents := make([]string, len(candidates))
 	for i, c := range candidates {
 		documents[i] = c.Text

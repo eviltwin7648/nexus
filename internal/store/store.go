@@ -378,13 +378,25 @@ func (s *Store) GetDocumentByPath(ctx context.Context, path string) (*domain.Raw
 }
 
 func (s *Store) LexicalSearch(ctx context.Context, query string, topK int, sourceType *string) ([]ChunkResult, error) {
-	rows, err := s.pool.Query(ctx, `
-	SELECT id,doc_id,source_id,source_type,metadata->>'doc_path' as path, chunk_index, content, ts_rank(search_vector, plainto_tsquery('simple', $1)) as rank
-	FROM document_chunks
-	WHERE search_vector @@ plainto_tsquery('simple', $1)
-	ORDER BY rank DESC
-	LIMIT $2
-	`, query, topK)
+	var rows pgx.Rows
+	var err error
+	if sourceType == nil {
+		rows, err = s.pool.Query(ctx, `
+		SELECT id, doc_id, source_id, source_type, COALESCE(metadata->>'doc_path', id) as path, chunk_index, content, ts_rank(search_vector, plainto_tsquery('simple', $1)) as rank
+		FROM document_chunks
+		WHERE search_vector @@ plainto_tsquery('simple', $1)
+		ORDER BY rank DESC
+		LIMIT $2
+		`, query, topK)
+	} else {
+		rows, err = s.pool.Query(ctx, `
+		SELECT id, doc_id, source_id, source_type, COALESCE(metadata->>'doc_path', id) as path, chunk_index, content, ts_rank(search_vector, plainto_tsquery('simple', $1)) as rank
+		FROM document_chunks
+		WHERE search_vector @@ plainto_tsquery('simple', $1) AND source_type = $2
+		ORDER BY rank DESC
+		LIMIT $3
+		`, query, *sourceType, topK)
+	}
 	if err != nil {
 		return nil, err
 	}

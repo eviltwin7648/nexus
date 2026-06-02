@@ -44,12 +44,28 @@ func (c *Connector) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("build request %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-Github-Api-Version", "2022-11-28")
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("http get %s: %w", path, err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized && c.token != "" {
+		resp.Body.Close()
+		reqNoAuth, errNoAuth := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if errNoAuth != nil {
+			return fmt.Errorf("build unauthenticated request: %w", errNoAuth)
+		}
+		reqNoAuth.Header.Set("Accept", "application/vnd.github+json")
+		reqNoAuth.Header.Set("X-Github-Api-Version", "2022-11-28")
+		respNoAuth, errNoAuth := c.client.Do(reqNoAuth)
+		if errNoAuth != nil {
+			return fmt.Errorf("http get (unauthenticated) %s: %w", path, errNoAuth)
+		}
+		resp = respNoAuth
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
